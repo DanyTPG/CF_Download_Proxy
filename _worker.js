@@ -1,11 +1,3 @@
-// دامنه ورکرتون یا نیم بهارو اینجا بزارید 
-const Domain = 'https://nimbaha.ir.cdn.ir'; 
-
-// تنظیمات احراز هویت HTTP
-const AUTH_ENABLED = false; // تغییر به true یا false برای فعال/غیرفعال کردن احراز هویت
-const USERNAME = 'admin';  // نام کاربری را اینجا تغییر دهید
-const PASSWORD = 'proxy123'; // رمز عبور را اینجا تغییر دهید
-
 // کش برای ذخیره نتایج درخواست‌های تکراری
 const cache = new Map();
 
@@ -42,6 +34,15 @@ function checkAuth(request) {
 
 export default {
     async fetch(request, env, ctx) {
+
+        // دامنه ورکرتون یا نیم بهارو اینجا بزارید 
+        const Domain = env.DOMAIN; 
+
+        // تنظیمات احراز هویت HTTP
+        const AUTH_ENABLED = env.AUTH_ENABLED; // تغییر به true یا false برای فعال/غیرفعال کردن احراز هویت
+        const USERNAME = env.USERNAME;  // نام کاربری را اینجا تغییر دهید
+        const PASSWORD = env.PASSWORD; // رمز عبور را اینجا تغییر دهید
+
         const url = new URL(request.url);
         const { pathname } = url;
 
