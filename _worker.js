@@ -14,9 +14,9 @@ function fromBase64(b64) {
 }
 
 // تابع بررسی احراز هویت HTTP Basic
-function checkAuth(request) {
+function checkAuth(request, env) {
     // اگر احراز هویت غیرفعال است، همیشه اجازه دسترسی بدهید
-    if (!AUTH_ENABLED) return true;
+    if (!env.AUTH_ENABLED) return true;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Basic ')) {
@@ -29,7 +29,7 @@ function checkAuth(request) {
     const [username, password] = decodedCredentials.split(':');
     
     // بررسی نام کاربری و رمز عبور
-    return username === USERNAME && password === PASSWORD;
+    return username === env.USERNAME && password === env.PASSWORD;
 }
 
 export default {
@@ -61,7 +61,7 @@ export default {
         // بررسی احراز هویت برای همه درخواست‌ها به جز فایل‌های استاتیک
         if (!pathname.endsWith('.css') && !pathname.endsWith('.js')) {
             // بررسی احراز هویت
-            if (!checkAuth(request)) {
+            if (!checkAuth(request, env)) {
                 return new Response('Unauthorized', {
                     status: 401,
                     headers: {
