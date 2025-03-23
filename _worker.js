@@ -16,7 +16,7 @@ function fromBase64(b64) {
 // تابع بررسی احراز هویت HTTP Basic
 function checkAuth(request, env) {
     // اگر احراز هویت غیرفعال است، همیشه اجازه دسترسی بدهید
-    if (!env.AUTH_ENABLED) return true;
+    if (env.AUTH_ENABLED === "false") return true;
     
     const authHeader = request.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Basic ')) {
