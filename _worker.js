@@ -14,6 +14,16 @@ function fromBase64(b64) {
     }
 }
 
+function getFormattedDomain(domain, fallbackOrigin) {
+    if (!domain) return fallbackOrigin;
+    domain = domain.trim();
+    if (!domain) return fallbackOrigin;
+    if (!domain.startsWith('http://') && !domain.startsWith('https://')) {
+        domain = `https://${domain}`;
+    }
+    return domain.replace(/\/+$/, '');
+}
+
 async function timingSafeEqualStr(a, b) {
     const enc = new TextEncoder();
     const bufA = enc.encode(a);
@@ -60,8 +70,14 @@ export default {
         const url = new URL(request.url);
         const { pathname } = url;
 
-        // Static asset bypass for CSS/JS
-        const isStaticAsset = pathname.endsWith('.css') || pathname.endsWith('.js') || pathname.endsWith('.ico') || pathname.endsWith('.svg');
+        // Static asset bypass for CSS/JS/fonts/icons
+        const isStaticAsset = pathname.endsWith('.css') ||
+                              pathname.endsWith('.js') ||
+                              pathname.endsWith('.ico') ||
+                              pathname.endsWith('.svg') ||
+                              pathname.endsWith('.png') ||
+                              pathname.endsWith('.jpg');
+
         if (!isStaticAsset && !(await checkAuth(request, env))) {
             return new Response('Unauthorized', {
                 status: 401,
@@ -72,7 +88,9 @@ export default {
             });
         }
 
-        // Backward compatibility for /proxy endpoint (encoded client-side in updated UI)
+        const configuredDomain = getFormattedDomain(env.DOMAIN, url.origin);
+
+        // Backward compatibility for /proxy endpoint
         if (pathname === '/proxy') {
             const originalUrl = url.searchParams.get('url');
             if (!originalUrl) {
@@ -86,8 +104,7 @@ export default {
                 }
                 const filename = parsed.pathname.split('/').filter(Boolean).pop() || 'download';
                 const encodedData = toBase64(JSON.stringify({ url: originalUrl, filename }));
-                const domain = env.DOMAIN || url.origin;
-                const proxiedUrl = `${domain}/dl/${encodedData}`;
+                const proxiedUrl = `${configuredDomain}/dl/${encodedData}`;
 
                 return new Response(JSON.stringify({ proxiedUrl, filename }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -154,8 +171,35 @@ export default {
             }
         }
 
+        // Handle /test route and rewrite path if necessary
+        let assetRequest = request;
+        if (pathname === '/test' || pathname === '/test/') {
+            assetRequest = new Request(new URL('/test/index.html', request.url), request);
+        }
+
         // Fallback for static assets
-        const assetResponse = await env.ASSETS.fetch(request);
+        const assetResponse = await env.ASSETS.fetch(assetRequest);
+        const contentType = assetResponse.headers.get('content-type') || '';
+
+        // Inject configured domain into root HTML
+        if (contentType.includes('text/html') && (pathname === '/' || pathname === '/index.html')) {
+            const html = await assetResponse.text();
+            const injectedHtml = html.replace(
+                '</head>',
+                `<meta name="proxy-domain" content="${configuredDomain}">\n</head>`
+            );
+            const modifiedHeaders = new Headers(assetResponse.headers);
+            for (const [key, value] of Object.entries(corsHeaders)) {
+                modifiedHeaders.set(key, value);
+            }
+            modifiedHeaders.delete('content-length');
+
+            return new Response(injectedHtml, {
+                status: assetResponse.status,
+                headers: modifiedHeaders,
+            });
+        }
+
         const modifiedHeaders = new Headers(assetResponse.headers);
         for (const [key, value] of Object.entries(corsHeaders)) {
             modifiedHeaders.set(key, value);

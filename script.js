@@ -90,7 +90,8 @@ document.getElementById('proxyForm').addEventListener('submit', (e) => {
     allProxiedUrls = [];
     allFilenames = [];
 
-    const baseUrl = window.location.origin;
+    const domainMeta = document.querySelector('meta[name="proxy-domain"]');
+    const baseUrl = (domainMeta?.content?.trim() || window.location.origin).replace(/\/+$/, '');
 
     for (const urlStr of urls) {
         const resultDiv = document.createElement('div');

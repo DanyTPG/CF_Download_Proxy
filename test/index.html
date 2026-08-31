@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CDN Edge Checker</title>
+  <link rel="stylesheet" href="/test/style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>CDN Edge Checker</h1>
+    <p class="subtitle">Find which CDN edge endpoints are responding (Client-side)</p>
+    <div class="input-section">
+      <label for="urlInput">CDN URL:</label>
+      <input type="url" id="urlInput" placeholder="https://cfnimer.433622.ir.cdn.ir/dl/..." size="60">
+      <button id="checkBtn">Check Edges</button>
+    </div>
+    <div id="status" class="status"></div>
+    <div id="results" class="results"></div>
+  </div>
+  <script src="/test/app.js"></script>
+</body>
+</html>
