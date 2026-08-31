@@ -171,14 +171,8 @@ export default {
             }
         }
 
-        // Handle /test route and rewrite path if necessary
-        let assetRequest = request;
-        if (pathname === '/test' || pathname === '/test/') {
-            assetRequest = new Request(new URL('/test/index.html', request.url), request);
-        }
-
         // Fallback for static assets
-        const assetResponse = await env.ASSETS.fetch(assetRequest);
+        const assetResponse = await env.ASSETS.fetch(request);
         const contentType = assetResponse.headers.get('content-type') || '';
 
         // Inject configured domain into root HTML
