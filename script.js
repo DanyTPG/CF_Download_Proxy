@@ -75,8 +75,11 @@ document.getElementById('downloadAllBtn')?.addEventListener('click', function() 
     }
 });
 
-document.getElementById('proxyForm').addEventListener('submit', (e) => {
+document.getElementById('proxyForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
 
     const urlsText = document.getElementById('urlInput').value;
     const urls = urlsText.split('\n').map(u => u.trim()).filter(Boolean);
@@ -90,9 +93,6 @@ document.getElementById('proxyForm').addEventListener('submit', (e) => {
     allProxiedUrls = [];
     allFilenames = [];
 
-    const domainMeta = document.querySelector('meta[name="proxy-domain"]');
-    const baseUrl = (domainMeta?.content?.trim() || window.location.origin).replace(/\/+$/, '');
-
     for (const urlStr of urls) {
         const resultDiv = document.createElement('div');
         resultDiv.className = 'result-item';
@@ -103,9 +103,14 @@ document.getElementById('proxyForm').addEventListener('submit', (e) => {
                 throw new Error('Invalid protocol (must be http:// or https://)');
             }
 
-            const filename = parsed.pathname.split('/').filter(Boolean).pop() || 'download';
-            const encodedData = toBase64(JSON.stringify({ url: urlStr, filename }));
-            const proxiedUrl = `${baseUrl}/dl/${encodedData}`;
+            const res = await fetch(`/proxy?url=${encodeURIComponent(urlStr)}`);
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(errText || `Server error (${res.status})`);
+            }
+            const data = await res.json();
+            const proxiedUrl = data.proxiedUrl;
+            const filename = data.filename;
 
             allProxiedUrls.push(proxiedUrl);
             allFilenames.push(filename);
@@ -163,6 +168,7 @@ document.getElementById('proxyForm').addEventListener('submit', (e) => {
         resultsContainer.appendChild(resultDiv);
     }
 
+    if (submitBtn) submitBtn.disabled = false;
     resultsContainer.style.display = 'block';
     if (allProxiedUrls.length > 0) {
         bulkContainer.style.display = 'flex';

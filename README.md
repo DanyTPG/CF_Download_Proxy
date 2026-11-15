@@ -26,7 +26,8 @@ Iranian users can access our services at half bandwidth using the services of th
 ## Features | ویژگی‌ها
 
 - **Multi-URL Processing**: Process multiple URLs simultaneously (one per line)
-- **URL Encoding**: Automatic base64 encoding for secure URL processing
+- **HMAC-SHA256 URL Signing**: Protect target URLs with cryptographic HMAC-SHA256 signatures and expiration support
+- **URL Encoding**: Base64URL encoding for secure URL processing
 - **Range Request Support**: Resume downloading capabilities with range requests for large files
 - **Responsive Design**: Works seamlessly across various devices and screen sizes
 - **Bulk Actions**: Copy all proxied links or download them as a text file
@@ -35,12 +36,34 @@ Iranian users can access our services at half bandwidth using the services of th
 <div dir="rtl">
 
 - **پردازش چند URL**: پردازش همزمان چندین URL (هر کدام در یک خط)
-- **کدگذاری URL**: کدگذاری خودکار به base64 برای پردازش امن URLها
+- **امضای HMAC-SHA256 لینک‌ها**: محافظت از لینک‌های مقصد با امضای رمزنگاری شده HMAC-SHA256 و پشتیبانی از تاریخ انقضا
+- **کدگذاری Base64URL**: کدگذاری امن URLها به فرمت Base64URL
 - **پشتیبانی از درخواست‌های محدوده (Range)**: قابلیت ادامه دانلود با درخواست‌های محدوده برای فایل‌های بزرگ
 - **طراحی واکنش‌گرا**: کارکرد روان روی دستگاه‌ها و اندازه‌های صفحه مختلف
 - **اقدامات دسته‌ای**: کپی تمام لینک‌های پروکسی شده یا دانلود آن‌ها به عنوان یک فایل متنی  
 - **پشتیبانی چند زبانه**: در دسترس به زبان‌های انگلیسی و فارسی
 </div>
+
+## URL Signing & Security | امنیت و امضای لینک‌ها
+
+The `/dl/` endpoint expects signed tokens in the following format:
+```text
+/dl/<base64url-json>.<base64url-signature>
+```
+
+The payload is a JSON object signed via HMAC-SHA256 using `DOWNLOAD_PROXY_SECRET` (or `SIGNING_SECRET`):
+```json
+{
+  "url": "https://example.com/file.mp4",
+  "filename": "video.mp4",
+  "exp": 1794747600
+}
+```
+- `url`: The target URL to download (required).
+- `filename`: Download filename (optional).
+- `exp`: Unix timestamp in seconds when the link expires (optional).
+
+If `exp` is in the past or the signature does not match, the worker returns `403 Forbidden`.
 
 ## Usage | استفاده
 

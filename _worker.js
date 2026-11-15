@@ -1,16 +1,73 @@
-function toBase64(str) {
-    const bytes = new TextEncoder().encode(str);
-    const bin = Array.from(bytes, b => String.fromCharCode(b)).join('');
-    return btoa(bin);
+function bytesToBase64Url(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+        bin += String.fromCharCode(bytes[i]);
+    }
+    return btoa(bin)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
 }
 
-function fromBase64(b64) {
+function stringToBase64Url(str) {
+    const bytes = new TextEncoder().encode(str);
+    return bytesToBase64Url(bytes);
+}
+
+function base64UrlToBytes(base64url) {
+    let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4 !== 0) {
+        base64 += '=';
+    }
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) {
+        bytes[i] = bin.charCodeAt(i);
+    }
+    return bytes;
+}
+
+function base64UrlToString(base64url) {
+    const bytes = base64UrlToBytes(base64url);
+    return new TextDecoder().decode(bytes);
+}
+
+async function signHmacSha256(dataStr, secretKey) {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(secretKey),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+    );
+    const signatureBuffer = await crypto.subtle.sign(
+        'HMAC',
+        key,
+        encoder.encode(dataStr)
+    );
+    return bytesToBase64Url(new Uint8Array(signatureBuffer));
+}
+
+async function verifyHmacSha256(dataStr, base64UrlSig, secretKey) {
     try {
-        const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
-        const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-        return new TextDecoder().decode(bytes);
+        const encoder = new TextEncoder();
+        const key = await crypto.subtle.importKey(
+            'raw',
+            encoder.encode(secretKey),
+            { name: 'HMAC', hash: 'SHA-256' },
+            false,
+            ['verify']
+        );
+        const sigBytes = base64UrlToBytes(base64UrlSig);
+        return await crypto.subtle.verify(
+            'HMAC',
+            key,
+            sigBytes,
+            encoder.encode(dataStr)
+        );
     } catch {
-        throw new Error('Invalid Base64 string');
+        return false;
     }
 }
 
@@ -57,7 +114,7 @@ async function checkAuth(request, env) {
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
     'Access-Control-Allow-Headers': '*',
 };
 
@@ -78,7 +135,10 @@ export default {
                               pathname.endsWith('.png') ||
                               pathname.endsWith('.jpg');
 
-        if (!isStaticAsset && !(await checkAuth(request, env))) {
+        // /dl/ routes are authenticated by HMAC-SHA256 signatures, exempt from Basic Auth
+        const isPublicRoute = isStaticAsset || pathname.startsWith('/dl/');
+
+        if (!isPublicRoute && !(await checkAuth(request, env))) {
             return new Response('Unauthorized', {
                 status: 401,
                 headers: {
@@ -89,8 +149,9 @@ export default {
         }
 
         const configuredDomain = getFormattedDomain(env.DOMAIN, url.origin);
+        const secretKey = env.DOWNLOAD_PROXY_SECRET || env.SIGNING_SECRET || env.HMAC_SECRET || env.SECRET_KEY || 'cf-download-proxy-secret-key';
 
-        // Backward compatibility for /proxy endpoint
+        // /proxy endpoint for generating HMAC-SHA256 signed URLs
         if (pathname === '/proxy') {
             const originalUrl = url.searchParams.get('url');
             if (!originalUrl) {
@@ -102,9 +163,18 @@ export default {
                 if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
                     return new Response('Invalid URL protocol', { status: 400, headers: corsHeaders });
                 }
-                const filename = parsed.pathname.split('/').filter(Boolean).pop() || 'download';
-                const encodedData = toBase64(JSON.stringify({ url: originalUrl, filename }));
-                const proxiedUrl = `${configuredDomain}/dl/${encodedData}`;
+                const filename = url.searchParams.get('filename') || parsed.pathname.split('/').filter(Boolean).pop() || 'download';
+                const payload = { url: originalUrl, filename };
+                const expParam = url.searchParams.get('exp');
+                if (expParam) {
+                    const expNum = Number(expParam);
+                    if (!isNaN(expNum)) payload.exp = expNum;
+                }
+
+                const jsonPayload = JSON.stringify(payload);
+                const encodedData = stringToBase64Url(jsonPayload);
+                const signature = await signHmacSha256(jsonPayload, secretKey);
+                const proxiedUrl = `${configuredDomain}/dl/${encodedData}.${signature}`;
 
                 return new Response(JSON.stringify({ proxiedUrl, filename }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -115,14 +185,59 @@ export default {
         }
 
         if (pathname.startsWith('/dl/')) {
-            const base64Data = pathname.slice(4);
-            if (!base64Data) {
+            const token = pathname.replace(/^\/dl\/?/, '');
+            if (!token) {
                 return new Response('Data parameter is missing', { status: 400, headers: corsHeaders });
             }
 
+            const dotIndex = token.indexOf('.');
+            if (dotIndex === -1) {
+                return new Response('Invalid token format: missing signature', { status: 403, headers: corsHeaders });
+            }
+
+            const b64UrlPayload = token.slice(0, dotIndex);
+            const b64UrlSignature = token.slice(dotIndex + 1);
+
+            if (!b64UrlPayload || !b64UrlSignature) {
+                return new Response('Invalid token format', { status: 403, headers: corsHeaders });
+            }
+
+            let jsonPayload;
             try {
-                const decodedData = fromBase64(base64Data);
-                const { url: targetUrl, filename } = JSON.parse(decodedData);
+                jsonPayload = base64UrlToString(b64UrlPayload);
+            } catch {
+                return new Response('Invalid Base64 payload', { status: 400, headers: corsHeaders });
+            }
+
+            if (!secretKey) {
+                return new Response('Server configuration error: signing secret is not configured', { status: 500, headers: corsHeaders });
+            }
+
+            // Verify HMAC-SHA256 signature calculated from the exact JSON payload
+            const isValid = await verifyHmacSha256(jsonPayload, b64UrlSignature, secretKey);
+            if (!isValid) {
+                return new Response('Invalid signature', { status: 403, headers: corsHeaders });
+            }
+
+            try {
+                const payload = JSON.parse(jsonPayload);
+                const { url: targetUrl, filename, exp } = payload;
+
+                if (!targetUrl || typeof targetUrl !== 'string') {
+                    return new Response('Invalid payload: missing target URL', { status: 400, headers: corsHeaders });
+                }
+
+                // Check link expiration if present
+                if (exp !== undefined && exp !== null) {
+                    const expNum = Number(exp);
+                    if (isNaN(expNum)) {
+                        return new Response('Invalid expiration timestamp', { status: 400, headers: corsHeaders });
+                    }
+                    const now = Math.floor(Date.now() / 1000);
+                    if (now > expNum) {
+                        return new Response('Link expired', { status: 403, headers: corsHeaders });
+                    }
+                }
 
                 const parsedTarget = new URL(targetUrl);
                 if (parsedTarget.protocol !== 'http:' && parsedTarget.protocol !== 'https:') {
@@ -136,8 +251,9 @@ export default {
                     if (value) forwardHeaders.set(header, value);
                 }
 
+                const method = request.method === 'HEAD' ? 'HEAD' : 'GET';
                 const upstreamResponse = await fetch(parsedTarget.toString(), {
-                    method: 'GET',
+                    method,
                     headers: forwardHeaders,
                     redirect: 'follow'
                 });
@@ -146,7 +262,9 @@ export default {
                 const safeFilename = (filename || parsedTarget.pathname.split('/').filter(Boolean).pop() || 'download')
                     .replace(/["\r\n\\]/g, '_');
 
-                responseHeaders.set('Content-Disposition', `attachment; filename="${safeFilename}"`);
+                const asciiFilename = safeFilename.replace(/[^\x20-\x7E]/g, '_');
+                const encodedFilename = encodeURIComponent(safeFilename);
+                responseHeaders.set('Content-Disposition', `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`);
                 responseHeaders.set('Accept-Ranges', 'bytes');
 
                 for (const h of ['content-type', 'content-length', 'content-range', 'etag', 'last-modified']) {
@@ -158,7 +276,7 @@ export default {
                     responseHeaders.set(key, value);
                 }
 
-                return new Response(upstreamResponse.body, {
+                return new Response(request.method === 'HEAD' ? null : upstreamResponse.body, {
                     status: upstreamResponse.status,
                     headers: responseHeaders
                 });
