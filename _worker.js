@@ -135,8 +135,14 @@ export default {
                               pathname.endsWith('.png') ||
                               pathname.endsWith('.jpg');
 
-        // /dl/ routes are authenticated by HMAC-SHA256 signatures, exempt from Basic Auth
-        const isPublicRoute = isStaticAsset || pathname.startsWith('/dl/');
+        // Public routes exempt from Basic Auth:
+        // - Static assets (CSS, JS, fonts, images)
+        // - /dl/ routes (authenticated by HMAC-SHA256 signatures)
+        // - /test/ edge checker suite
+        const isPublicRoute = isStaticAsset ||
+                              pathname.startsWith('/dl/') ||
+                              pathname === '/test' ||
+                              pathname.startsWith('/test/');
 
         if (!isPublicRoute && !(await checkAuth(request, env))) {
             return new Response('Unauthorized', {
